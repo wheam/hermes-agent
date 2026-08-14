@@ -115,6 +115,18 @@ class TestParseResponse:
         assert shell_hooks._parse_response("pre_verify", '{"action": "continue"}') is None
         assert shell_hooks._parse_response("pre_verify", '{"decision": "allow"}') is None
 
+    def test_pre_response_continue_preserves_safe_fallback(self):
+        r = shell_hooks._parse_response(
+            "pre_response",
+            '{"action":"continue","message":"read memory",'
+            '"fallback_response":"I cannot verify that yet."}',
+        )
+        assert r == {
+            "action": "continue",
+            "message": "read memory",
+            "fallback_response": "I cannot verify that yet.",
+        }
+
     def test_block_action_without_message_uses_default(self):
         """Block is honored even when message/reason is absent."""
         r = shell_hooks._parse_response("pre_tool_call", '{"action": "block"}')

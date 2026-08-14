@@ -105,6 +105,64 @@ def test_pre_verify_preserves_composed_report_at_budget_limit(agent, monkeypatch
     assert not result["messages"][1].get("_pre_verify_synthetic")
 
 
+def test_pre_response_uses_safe_fallback_at_budget_limit(agent, monkeypatch):
+    agent._interruptible_api_call = lambda _kwargs: _response("unsupported guess")
+    agent._handle_max_iterations = MagicMock(return_value="replacement summary")
+    monkeypatch.setenv("HERMES_VERIFY_ON_STOP", "0")
+
+    with (
+        patch("hermes_cli.plugins.has_hook", side_effect=lambda name: name == "pre_response"),
+        patch(
+            "hermes_cli.plugins.get_pre_response_continue_directive",
+            return_value={
+                "message": "read the configured evidence source",
+                "fallback_response": "I could not verify that yet.",
+            },
+        ),
+        patch("hermes_cli.plugins.invoke_hook", return_value=[]),
+    ):
+        result = agent.run_conversation("What did I decide last time?")
+
+    assert result["final_response"] == "I could not verify that yet."
+    assert result["turn_exit_reason"] == "max_iterations_reached(1/1)"
+    assert [message["role"] for message in result["messages"]] == [
+        "user",
+        "assistant",
+    ]
+    assert result["messages"][1]["content"] == "I could not verify that yet."
+    assert not result["messages"][1].get("_pre_response_synthetic")
+    agent._handle_max_iterations.assert_not_called()
+
+
+def test_pre_response_rejected_candidate_does_not_persist(agent, monkeypatch):
+    agent.max_iterations = 2
+    agent.iteration_budget.max_total = 2
+    answers = iter([_response("unsupported guess"), _response("verified answer")])
+    agent._interruptible_api_call = lambda _kwargs: next(answers)
+    monkeypatch.setenv("HERMES_VERIFY_ON_STOP", "0")
+
+    with (
+        patch("hermes_cli.plugins.has_hook", side_effect=lambda name: name == "pre_response"),
+        patch(
+            "hermes_cli.plugins.get_pre_response_continue_directive",
+            side_effect=[
+                {"message": "read the configured evidence source"},
+                None,
+            ],
+        ),
+        patch("hermes_cli.plugins.invoke_hook", return_value=[]),
+    ):
+        result = agent.run_conversation("What did I decide last time?")
+
+    assert result["final_response"] == "verified answer"
+    assert [message["role"] for message in result["messages"]] == [
+        "user",
+        "assistant",
+    ]
+    assert all(message.get("content") != "unsupported guess" for message in result["messages"])
+    assert all(not message.get("_pre_response_synthetic") for message in result["messages"])
+
+
 def test_intermediate_ack_uses_summary_instead_of_premature_text(agent, monkeypatch):
     agent.valid_tool_names = ["web_search"]
     agent._intent_ack_continuation = True

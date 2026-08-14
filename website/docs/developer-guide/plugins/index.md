@@ -589,6 +589,7 @@ def register(ctx):
     ctx.register_hook("pre_tool_call", before_any_tool)
     ctx.register_hook("post_tool_call", after_any_tool)
     ctx.register_hook("pre_llm_call", inject_memory)
+    ctx.register_hook("pre_response", require_evidence)
     ctx.register_hook("on_session_start", on_new_session)
     ctx.register_hook("on_session_end", on_session_end)
 ```
@@ -603,6 +604,7 @@ Each hook is documented in full on the **[Event Hooks reference](/user-guide/fea
 | [`post_tool_call`](/user-guide/features/hooks#post_tool_call) | After any tool returns | `tool_name: str, args: dict, result: str, task_id: str, duration_ms: int` | ignored |
 | [`pre_llm_call`](/user-guide/features/hooks#pre_llm_call) | Once per turn, before the tool-calling loop | `session_id: str, user_message: str, conversation_history: list, is_first_turn: bool, model: str, platform: str` | [context injection](#pre_llm_call-context-injection) |
 | [`post_llm_call`](/user-guide/features/hooks#post_llm_call) | Once per turn, after the tool-calling loop (successful turns only) | `session_id: str, user_message: str, assistant_response: str, conversation_history: list, model: str, platform: str` | ignored |
+| [`pre_response`](/user-guide/features/hooks#pre_response) | Before a composed answer is returned | `attempt: int, user_message, final_response: str, conversation_history: list, available_tools: list` | continue directive |
 | [`on_session_start`](/user-guide/features/hooks#on_session_start) | New session created (first turn only) | `session_id: str, model: str, platform: str` | ignored |
 | [`on_session_end`](/user-guide/features/hooks#on_session_end) | End of every `run_conversation` call + CLI exit | `session_id: str, completed: bool, interrupted: bool, model: str, platform: str` | ignored |
 | [`on_session_finalize`](/user-guide/features/hooks#on_session_finalize) | CLI/gateway tears down an active session | `session_id: str \| None, platform: str` | ignored |
@@ -611,7 +613,7 @@ Each hook is documented in full on the **[Event Hooks reference](/user-guide/fea
 | `kanban_task_completed` | A kanban task completes (worker process) | `task_id, board, assignee, run_id, profile_name, summary: str \| None` | ignored |
 | `kanban_task_blocked` | A kanban task is blocked (worker process) | `task_id, board, assignee, run_id, profile_name, reason: str \| None` | ignored |
 
-Most hooks are fire-and-forget observers — their return values are ignored. The exception is `pre_llm_call`, which can inject context into the conversation.
+Most hooks are fire-and-forget observers. `pre_llm_call` can inject context, while `pre_response` can withhold a candidate answer and request a bounded continuation.
 
 All callbacks should accept `**kwargs` for forward compatibility. If a hook callback crashes, it's logged and skipped. Other hooks and the agent continue normally.
 

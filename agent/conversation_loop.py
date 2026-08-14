@@ -5860,9 +5860,65 @@ def run_conversation(
                         messages[-1].get("_thinking_prefill")
                         or messages[-1].get("_empty_recovery_synthetic")
                         or messages[-1].get("_empty_terminal_sentinel")
+                        or messages[-1].get("_pre_response_synthetic")
                     )
                 ):
                     messages.pop()
+
+                # General final-response policy gate. Unlike verification
+                # continuations, a rejected candidate is not user-visible and
+                # must not persist: both it and the nudge are flagged as
+                # ephemeral scaffolding. Plugins can use this to require
+                # missing evidence or a tool call before an answer is allowed
+                # to leave Hermes, without hard-coding any knowledge provider
+                # or domain into the core runtime.
+                _pre_response_directive = None
+                _pre_response_attempt = getattr(agent, "_pre_response_nudges", 0)
+                try:
+                    from hermes_cli.plugins import (
+                        get_pre_response_continue_directive,
+                        has_hook,
+                    )
+
+                    if has_hook("pre_response") and _pre_response_attempt < 2:
+                        _pre_response_directive = get_pre_response_continue_directive(
+                            session_id=getattr(agent, "session_id", None) or "",
+                            platform=getattr(agent, "platform", "") or "",
+                            model=getattr(agent, "model", "") or "",
+                            attempt=_pre_response_attempt,
+                            user_message=original_user_message,
+                            final_response=final_response,
+                            conversation_history=messages[current_turn_user_idx:],
+                            available_tools=sorted(getattr(agent, "valid_tool_names", []) or []),
+                        )
+                except Exception:
+                    logger.debug("pre_response hook check failed", exc_info=True)
+                    _pre_response_directive = None
+
+                if _pre_response_directive:
+                    agent._pre_response_nudges = _pre_response_attempt + 1
+                    final_msg["finish_reason"] = "response_policy_continue"
+                    final_msg["_pre_response_synthetic"] = True
+                    messages.append(final_msg)
+                    messages.append({
+                        "role": "user",
+                        "content": _pre_response_directive["message"],
+                        "_pre_response_synthetic": True,
+                    })
+                    agent._session_messages = messages
+                    logger.info(
+                        "pre_response nudge issued (attempt %d)",
+                        agent._pre_response_nudges,
+                    )
+                    _pending_verification_response = (
+                        _pre_response_directive.get("fallback_response")
+                        or final_response
+                    )
+                    # The rejected candidate is deliberately withheld, so it
+                    # can never count as a previewed fallback.
+                    _pending_verification_response_previewed = False
+                    final_response = None
+                    continue
 
                 try:
                     from agent.verification_stop import (

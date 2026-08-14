@@ -371,7 +371,7 @@ def register(ctx):
 
 - Callbacks receive **keyword arguments**. Always accept `**kwargs` for forward compatibility — new parameters may be added in future versions without breaking your plugin.
 - If a callback **crashes**, it's logged and skipped. Other hooks and the agent continue normally. A misbehaving plugin can never break the agent.
-- Two hooks' return values affect behavior: [`pre_tool_call`](#pre_tool_call) can **block** the tool, and [`pre_llm_call`](#pre_llm_call) can **inject context** into the LLM call. All other hooks are fire-and-forget observers.
+- Four hooks' return values affect behavior: [`pre_tool_call`](#pre_tool_call) can **block** a tool, [`pre_llm_call`](#pre_llm_call) can **inject context**, and [`pre_response`](#pre_response) / [`pre_verify`](#pre_verify) can require a bounded continuation before Hermes finishes. All other hooks are fire-and-forget observers.
 - Observer callbacks receive `telemetry_schema_version` automatically. When present, `turn_id`, `api_request_id`, `task_id`, `session_id`, and `api_call_count` are separate correlation fields. Treat `api_request_id` as an opaque identifier; do not parse its string format.
 
 ### Quick reference
@@ -382,6 +382,7 @@ def register(ctx):
 | [`post_tool_call`](#post_tool_call) | After any tool returns | ignored |
 | [`pre_llm_call`](#pre_llm_call) | Once per turn, before the tool-calling loop | `{"context": str}` to prepend context to the user message |
 | [`post_llm_call`](#post_llm_call) | Once per turn, after the tool-calling loop | ignored |
+| [`pre_response`](#pre_response) | Before a composed answer is returned | `{"action": "continue", "message": str}` to withhold it and keep going |
 | [`pre_verify`](#pre_verify) | Once per turn when the agent edited code, before it verifies/finishes | `{"action": "continue", "message": str}` to keep going |
 | [`on_session_start`](#on_session_start) | New session created (first turn only) | ignored |
 | [`on_session_end`](#on_session_end) | Session ends | ignored |
@@ -650,6 +651,33 @@ def log_response_length(session_id, assistant_response, model, **kwargs):
 def register(ctx):
     ctx.register_hook("post_llm_call", log_response_length)
 ```
+
+---
+
+### `pre_response`
+
+Fires after the model composes an answer but before Hermes returns or persists it. This is a general response-policy gate for plugins that must require evidence, a lookup, or another tool call before an answer may leave the agent.
+
+```python
+def require_evidence(attempt, user_message, conversation_history,
+                     available_tools, **kwargs):
+    if attempt or "my account" not in str(user_message).lower():
+        return None
+    if any(m.get("role") == "tool" for m in conversation_history):
+        return None
+    return {
+        "action": "continue",
+        "message": "Read the configured account source before answering.",
+        "fallback_response": "I could not verify that account detail yet.",
+    }
+
+def register(ctx):
+    ctx.register_hook("pre_response", require_evidence)
+```
+
+Callbacks receive `session_id`, `platform`, `model`, `attempt`, `user_message`, `final_response`, the current turn's `conversation_history`, and `available_tools`. Returning `{"action": "continue", "message": "..."}` withholds the candidate and runs another model iteration. The rejected candidate and synthetic nudge are ephemeral and never enter durable session history. The optional `fallback_response` is used only if the continuation exhausts the iteration budget. Hermes caps this gate at two continuations per turn.
+
+Use `attempt` and the current-turn history to make the hook idempotent. A missing or non-actionable return lets the answer finish normally.
 
 ---
 

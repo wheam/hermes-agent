@@ -238,6 +238,10 @@ _EPHEMERAL_SCAFFOLDING_FLAGS = (
     # persisted and emitted as an interim message (#65919).
     "_verification_stop_synthetic",
     "_pre_verify_synthetic",
+    # pre_response rejects a candidate before delivery. Both the candidate
+    # and its continuation nudge are private loop scaffolding and must never
+    # become durable history.
+    "_pre_response_synthetic",
     # kanban worker stop-guard: narrated exit without kanban_complete/block
     "_kanban_stop_synthetic",
 )

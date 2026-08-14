@@ -139,6 +139,16 @@ _DEFAULT_PAYLOADS = {
         "model": "gpt-4",
         "platform": "cli",
     },
+    "pre_response": {
+        "session_id": "test-session",
+        "platform": "cli",
+        "model": "gpt-4",
+        "attempt": 0,
+        "user_message": "What did I decide last time?",
+        "final_response": "I think you chose option A.",
+        "conversation_history": [],
+        "available_tools": ["mcp__personal_memory__recall"],
+    },
     "pre_verify": {
         "session_id": "test-session",
         "platform": "cli",

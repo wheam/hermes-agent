@@ -18,6 +18,7 @@ from hermes_cli.plugins import (
     get_plugin_command_handler,
     get_plugin_commands,
     get_pre_tool_call_block_message,
+    get_pre_response_continue_directive,
     get_pre_verify_continue_message,
     has_middleware,
     resolve_plugin_command_result,
@@ -1089,6 +1090,59 @@ class TestGetPreVerifyContinueMessage:
         assert seen["coding"] is True
         assert seen["attempt"] == 2
         assert seen["changed_paths"] == ["a.py"]
+
+
+class TestGetPreResponseContinueDirective:
+    """The pre-response policy gate preserves scope and a safe fallback."""
+
+    def test_continue_with_fallback(self, monkeypatch):
+        monkeypatch.setattr(
+            "hermes_cli.plugins.invoke_hook",
+            lambda hook_name, **kwargs: [{
+                "action": "continue",
+                "message": "read personal context first",
+                "fallback_response": "I could not verify that yet.",
+            }],
+        )
+        assert get_pre_response_continue_directive(session_id="s") == {
+            "message": "read personal context first",
+            "fallback_response": "I could not verify that yet.",
+        }
+
+    def test_first_actionable_directive_wins(self, monkeypatch):
+        monkeypatch.setattr(
+            "hermes_cli.plugins.invoke_hook",
+            lambda hook_name, **kwargs: [
+                {"action": "allow"},
+                {"decision": "block", "reason": "  fetch evidence  "},
+                {"action": "continue", "message": "ignored"},
+            ],
+        )
+        assert get_pre_response_continue_directive() == {
+            "message": "fetch evidence",
+        }
+
+    def test_forwards_turn_scope(self, monkeypatch):
+        seen = {}
+
+        def capture(hook_name, **kwargs):
+            seen["hook_name"] = hook_name
+            seen.update(kwargs)
+            return []
+
+        monkeypatch.setattr("hermes_cli.plugins.invoke_hook", capture)
+        history = [{"role": "user", "content": "my laptop"}]
+        assert get_pre_response_continue_directive(
+            attempt=1,
+            user_message="my laptop",
+            conversation_history=history,
+            available_tools=["memory_recall"],
+        ) is None
+        assert seen["hook_name"] == "pre_response"
+        assert seen["attempt"] == 1
+        assert seen["user_message"] == "my laptop"
+        assert seen["conversation_history"] == history
+        assert seen["available_tools"] == ["memory_recall"]
 
 
 class TestThreadToolWhitelist:

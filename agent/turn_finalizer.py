@@ -42,14 +42,14 @@ def _is_pure_tool_call_tail(msg: dict) -> bool:
     return not flatten_message_text(msg.get("content")).strip()
 
 
-# Verification continuation scaffolding flags: verify-on-stop / pre_verify
-# inject a synthetic user nudge to keep the agent going one more turn.
-# These nudges must be stripped from returned/live history to avoid
-# role-alternation breaks and poisoning the resumed transcript. The
-# assistant response is real content and is not flagged. (#65919 §7)
+# Continuation scaffolding flags: verify-on-stop / pre_verify inject a
+# synthetic user nudge, while pre_response marks both its rejected assistant
+# candidate and nudge. These messages must be stripped from returned/live
+# history to avoid role-alternation breaks and poisoning resumed transcripts.
 _VERIFICATION_CONTINUATION_FLAGS = (
     "_verification_stop_synthetic",
     "_pre_verify_synthetic",
+    "_pre_response_synthetic",
 )
 
 

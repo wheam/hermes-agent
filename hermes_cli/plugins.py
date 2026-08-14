@@ -143,6 +143,14 @@ VALID_HOOKS: Set[str] = {
     "transform_llm_output",
     "pre_llm_call",
     "post_llm_call",
+    # Final-response policy gate. Fired after the model composes a candidate
+    # response but before Hermes returns it. A callback may request one
+    # bounded continuation by returning:
+    #   {"action": "continue", "message": "<follow-up instruction>"}
+    # The candidate and nudge remain ephemeral so a rejected answer cannot
+    # poison the durable transcript. ``fallback_response`` is optional and
+    # is used only if the continuation exhausts the iteration budget.
+    "pre_response",
     # Verification-loop gate. Fired once per turn when the agent has edited code
     # and is about to verify/finish (after the verify-on-stop guard). A callback
     # may keep the agent going — run a check, defer it, tidy the diff — instead
@@ -2323,6 +2331,58 @@ def get_pre_verify_continue_message(
         message = result.get("message") or result.get("reason")
         if isinstance(message, str) and message.strip():
             return message.strip()
+
+    return None
+
+
+def get_pre_response_continue_directive(
+    *,
+    session_id: str = "",
+    platform: str = "",
+    model: str = "",
+    attempt: int = 0,
+    user_message: Any = "",
+    final_response: str = "",
+    conversation_history: Optional[List[Dict[str, Any]]] = None,
+    available_tools: Optional[List[str]] = None,
+) -> Optional[Dict[str, str]]:
+    """Return the first actionable ``pre_response`` continuation directive.
+
+    This is the general response-policy counterpart to ``pre_verify``. The
+    hook runs while the candidate answer can still be withheld, allowing a
+    plugin to require missing evidence or another tool call without exposing
+    or persisting the rejected candidate.
+
+    Callbacks return ``{"action": "continue", "message": "..."}`` (or the
+    Claude-Code stop-hook equivalent). An optional ``fallback_response`` is
+    preserved if the continuation consumes the remaining iteration budget.
+    """
+    hook_results = invoke_hook(
+        "pre_response",
+        session_id=session_id,
+        platform=platform,
+        model=model,
+        attempt=attempt,
+        user_message=user_message,
+        final_response=final_response,
+        conversation_history=list(conversation_history or []),
+        available_tools=list(available_tools or []),
+    )
+
+    for result in hook_results:
+        if not isinstance(result, dict):
+            continue
+        action = str(result.get("action") or result.get("decision") or "").strip().lower()
+        if action not in ("continue", "block"):
+            continue
+        message = result.get("message") or result.get("reason")
+        if not isinstance(message, str) or not message.strip():
+            continue
+        directive = {"message": message.strip()}
+        fallback = result.get("fallback_response")
+        if isinstance(fallback, str) and fallback.strip():
+            directive["fallback_response"] = fallback.strip()
+        return directive
 
     return None
 

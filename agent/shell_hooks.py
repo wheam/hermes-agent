@@ -602,7 +602,7 @@ def _parse_response(event: str, stdout: str) -> Optional[Dict[str, Any]]:
             return {"action": "block", "message": _block_message(data.get("reason"), data.get("message"))}
         return None
 
-    if event == "pre_verify":
+    if event in {"pre_verify", "pre_response"}:
         # "continue" (Hermes) / "block" (Claude-Code Stop: block the stop) both
         # mean keep going; the message/reason is the follow-up for the model. A
         # continue with no message is a no-op — let the turn finish.
@@ -610,7 +610,11 @@ def _parse_response(event: str, stdout: str) -> Optional[Dict[str, Any]]:
         if action in {"continue", "block"}:
             message = data.get("message") or data.get("reason")
             if isinstance(message, str) and message.strip():
-                return {"action": "continue", "message": message.strip()}
+                directive = {"action": "continue", "message": message.strip()}
+                fallback = data.get("fallback_response")
+                if event == "pre_response" and isinstance(fallback, str) and fallback.strip():
+                    directive["fallback_response"] = fallback.strip()
+                return directive
         return None
 
     context = data.get("context")

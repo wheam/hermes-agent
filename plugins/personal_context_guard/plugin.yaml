@@ -1,0 +1,6 @@
+name: personal-context-guard
+version: "0.1.0"
+description: "Require configured personal-knowledge reads before answering personal-reference questions. Inert until personal-context-guard.json is configured."
+author: wheam
+hooks:
+  - pre_response
